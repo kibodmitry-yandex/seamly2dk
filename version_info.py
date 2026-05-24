@@ -3,7 +3,7 @@
 VERSION = '0.0.1'
 AUTHOR = 'D. Kibo'
 YEAR = '2026'
-URL = 'https://example.com/seamly2dk'
+URL = 'https://github.com/kibodmitry-yandex/seamly2dk/releases'
 
 from PyInstaller.utils.win32.versioninfo import VSVersionInfo, StringStruct, StringTable, VarStruct, VarFileInfo, FixedFileInfo
 
