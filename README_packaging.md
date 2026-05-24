@@ -25,12 +25,9 @@ Notes:
 - The app uses relative file access; distribute sidecar `.json` files alongside the exe as needed.
 - For debugging, remove `--windowed` from the PyInstaller command to keep a console.
  - To embed Windows file metadata (author, version, copyright, download URL), edit
-	 `version_info.py` at the repo root and then run the same build scripts. PyInstaller
-	 will embed those fields into the generated `.exe` using the `--version-file` option.
-	 The following fields are available at the top of `version_info.py`:
-	 - `VERSION` (e.g. `0.1.0`)
-	 - `AUTHOR` (company/author name)
-	 - `YEAR` (copyright year)
-	 - `URL` (download/updates page — stored in `Comments`)
+	`release_meta.py` to set `VERSION`, `AUTHOR`, `YEAR`, `URL`, and `FILEDESC` used by the post-build step.
+	The build scripts now perform the sequence: build with PyInstaller (no version-file), then run `rcedit` to embed
+	string metadata into the generated `dist\seamly2dk.exe`. This avoids PyInstaller parsing issues with text version files.
+	Edit `release_meta.py` before running the build to change metadata.
 
 If you'd like, I can run the build here and upload the resulting exe (if environment permits).
