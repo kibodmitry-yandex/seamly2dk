@@ -22,8 +22,8 @@ if (-not (Test-Path $rcedit)) {
     try { Invoke-WebRequest -Uri $url -OutFile $rcedit -UseBasicParsing -ErrorAction Stop } catch { Write-Warning "Failed to download rcedit: $_" }
 }
 if (Test-Path $rcedit -and Test-Path $distExe) {
-    # read metadata from release_meta.py
-    $metaJson = & $python -c "import json, release_meta; print(json.dumps({'ver':release_meta.VERSION,'author':release_meta.AUTHOR,'year':release_meta.YEAR,'url':release_meta.URL,'desc':release_meta.FILEDESC}))"
+    # read metadata from release_meta.py (call python with a single-quoted argument to avoid PowerShell parsing)
+    $metaJson = & $python -c 'import json, release_meta; print(json.dumps({"ver":release_meta.VERSION,"author":release_meta.AUTHOR,"year":release_meta.YEAR,"url":release_meta.URL,"desc":release_meta.FILEDESC}))'
     $meta = $metaJson | ConvertFrom-Json
     $ver = "$($meta.ver).0"
     Write-Host "Applying version/resource strings to $distExe"
