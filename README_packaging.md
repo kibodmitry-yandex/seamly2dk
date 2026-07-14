@@ -31,3 +31,9 @@ Notes:
 	Edit `release_meta.py` before running the build to change metadata.
 
 If you'd like, I can run the build here and upload the resulting exe (if environment permits).
+
+# в корне репо
+Смена версии релиза в release_meta.py
+.\.venv\Scripts\Activate.ps1
+.\build_exe.ps1
+python g:\seamly2dk\tools\generate_sha256.py

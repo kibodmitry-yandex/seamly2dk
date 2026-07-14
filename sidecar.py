@@ -19,6 +19,16 @@ class Sidecar:
 
     def save(self):
         try:
+            # Avoid rewriting the file when data is unchanged to reduce churn
+            if os.path.exists(self.path):
+                try:
+                    with open(self.path, 'r', encoding='utf-8') as f:
+                        existing = json.load(f)
+                    if existing == self.data:
+                        return
+                except Exception:
+                    # fall through and rewrite if existing file cannot be read
+                    pass
             tmp = self.path + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)

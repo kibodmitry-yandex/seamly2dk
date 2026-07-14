@@ -31,6 +31,15 @@ def load_state():
 
 def save_state(state: dict):
     try:
+        # Avoid rewriting when state hasn't changed
+        if os.path.exists(APP_STATE_PATH):
+            try:
+                with open(APP_STATE_PATH, 'r', encoding='utf-8') as f:
+                    existing = json.load(f)
+                if existing == state:
+                    return
+            except Exception:
+                pass
         tmp = APP_STATE_PATH + '.tmp'
         with open(tmp, 'w', encoding='utf-8') as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
