@@ -2,3 +2,5 @@ app_state.json
 __pycache__/
 polo/
 tz.md
+.venv/
+SlipMy.svg

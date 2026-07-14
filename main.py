@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import threading
+import sys
 from svg_parser import parse_svg
 from opd import build_opd
 from sidecar import Sidecar
@@ -18,6 +19,8 @@ class App:
         header.grid(row=0, column=0, columnspan=2, sticky='ew', padx=4, pady=4)
         self.open_btn = tk.Button(header, text='Open SVG', command=self.open_file)
         self.open_btn.pack(side='left')
+
+        # (bbox moved to status bar)
 
         self.piece_var = tk.StringVar()
         self.piece_menu = tk.OptionMenu(header, self.piece_var, '')
@@ -106,6 +109,9 @@ class App:
         root.after(100, set_sash)
         # start autosave loop
         root.after(2000, self.autosave)
+        # status bar for showing bbox and other info
+        self.status_label = tk.Label(root, text='', anchor='w')
+        self.status_label.grid(row=3, column=0, columnspan=2, sticky='ew')
         # restore last opened file if present
         last_file = self.app_state.get('last_file')
         if last_file and os.path.exists(last_file):
@@ -407,6 +413,14 @@ class App:
             pass
         # remember current piece index
         self._current_piece_idx = idx
+
+        # update bbox label (show coordinates and width/height in mm)
+        try:
+            bbox_text = f"bbox=({minx:.3f},{miny:.3f},{maxx:.3f},{maxy:.3f}) w={w:.3f}mm h={h:.3f}mm"
+            if hasattr(self, 'status_label'):
+                self.status_label.config(text=bbox_text)
+        except Exception:
+            pass
 
         # show coords of first path in coords_text and OPD in opd_text
         if paths:
@@ -947,4 +961,8 @@ class App:
 if __name__ == '__main__':
     root = tk.Tk()
     app = App(root)
+    # Allow launching directly with an SVG path: python main.py file.svg
+    if len(sys.argv) > 1 and sys.argv[1]:
+        cli_path = sys.argv[1]
+        root.after(100, lambda: app.open_file(cli_path))
     root.mainloop()

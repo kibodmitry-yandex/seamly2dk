@@ -11,7 +11,7 @@ def parse_floats(s):
 
 
 def parse_path_d(d):
-    # Very small parser: handle M, L, C, Z. Return list of segments; curves will be flattened.
+    # Lightweight parser for common SVG path commands used in pattern files.
     tokens = COMMAND_RE.split(d)
     tokens = [t.strip() for t in tokens if t.strip()]
     cur = (0.0, 0.0)
@@ -23,25 +23,54 @@ def parse_path_d(d):
         coords = []
         if i <= len(tokens)-1:
             coords = parse_floats(tokens[i]); i += 1
-        if cmd in ('M','m'):
-            x,y = coords[0], coords[1]
-            cur = (x,y)
+        rel = cmd.islower()
+        op = cmd.upper()
+
+        if op == 'M':
+            # First pair is move-to, remaining pairs are implicit line-to.
+            if len(coords) < 2:
+                continue
+            x, y = coords[0], coords[1]
+            if rel:
+                cur = (cur[0] + x, cur[1] + y)
+            else:
+                cur = (x, y)
             start = cur
-            # treat M as move
-        elif cmd in ('L','l'):
-            pts = []
-            for j in range(0,len(coords),2):
-                x,y = coords[j], coords[j+1]
-                pts.append((x,y))
-            for p in pts:
+            for j in range(2, len(coords) - 1, 2):
+                x, y = coords[j], coords[j + 1]
+                p = (cur[0] + x, cur[1] + y) if rel else (x, y)
                 segments.append(('L', cur, p))
                 cur = p
-        elif cmd in ('C','c'):
-            # cubic bezier: groups of 6
-            for j in range(0,len(coords),6):
-                x1,y1,x2,y2,x3,y3 = coords[j:j+6]
-                p0 = cur; p1=(x1,y1); p2=(x2,y2); p3=(x3,y3)
-                segments.append(('C', p0,p1,p2,p3))
+        elif op == 'L':
+            for j in range(0, len(coords) - 1, 2):
+                x, y = coords[j], coords[j + 1]
+                p = (cur[0] + x, cur[1] + y) if rel else (x, y)
+                segments.append(('L', cur, p))
+                cur = p
+        elif op == 'H':
+            for x in coords:
+                p = (cur[0] + x, cur[1]) if rel else (x, cur[1])
+                segments.append(('L', cur, p))
+                cur = p
+        elif op == 'V':
+            for y in coords:
+                p = (cur[0], cur[1] + y) if rel else (cur[0], y)
+                segments.append(('L', cur, p))
+                cur = p
+        elif op == 'C':
+            # Cubic bezier: groups of 6 values.
+            for j in range(0, len(coords) - 5, 6):
+                x1, y1, x2, y2, x3, y3 = coords[j:j + 6]
+                if rel:
+                    p1 = (cur[0] + x1, cur[1] + y1)
+                    p2 = (cur[0] + x2, cur[1] + y2)
+                    p3 = (cur[0] + x3, cur[1] + y3)
+                else:
+                    p1 = (x1, y1)
+                    p2 = (x2, y2)
+                    p3 = (x3, y3)
+                p0 = cur
+                segments.append(('C', p0, p1, p2, p3))
                 cur = p3
         elif cmd in ('Z','z'):
             if start:
@@ -53,7 +82,7 @@ def parse_path_d(d):
     return segments
 
 
-def flatten_cubic(p0,p1,p2,p3, flatness=0.5, min_len=5.0):
+def flatten_cubic(p0,p1,p2,p3, flatness=0.5, min_len=5.0, max_depth=24):
     # recursive subdivision
     def dist_point_line(p, a, b):
         # distance from p to line ab
@@ -65,12 +94,13 @@ def flatten_cubic(p0,p1,p2,p3, flatness=0.5, min_len=5.0):
         px = x1 + t*dx; py = y1 + t*dy
         return ((x0-px)**2+(y0-py)**2)**0.5
 
-    def recurse(a,b,c,d):
+    def recurse(a,b,c,d,depth=0):
         # flatness: max distance of control points to chord
         d1 = dist_point_line(b, a, d)
         d2 = dist_point_line(c, a, d)
         chord_len = ((d[0]-a[0])**2 + (d[1]-a[1])**2)**0.5
-        if max(d1,d2) <= flatness and chord_len >= min_len:
+        # Stop when curve is flat enough, very short, or depth limit is reached.
+        if max(d1,d2) <= flatness or chord_len <= min_len or depth >= max_depth:
             return [a, d]
         # subdivide
         ab = ((a[0]+b[0])/2, (a[1]+b[1])/2)
@@ -79,8 +109,8 @@ def flatten_cubic(p0,p1,p2,p3, flatness=0.5, min_len=5.0):
         abbc = ((ab[0]+bc[0])/2, (ab[1]+bc[1])/2)
         bccd = ((bc[0]+cd[0])/2, (bc[1]+cd[1])/2)
         mid = ((abbc[0]+bccd[0])/2, (abbc[1]+bccd[1])/2)
-        left = recurse(a, ab, abbc, mid)
-        right = recurse(mid, bccd, cd, d)
+        left = recurse(a, ab, abbc, mid, depth + 1)
+        right = recurse(mid, bccd, cd, d, depth + 1)
         return left[:-1] + right
 
     pts = recurse(p0,p1,p2,p3)
@@ -90,30 +120,69 @@ def flatten_cubic(p0,p1,p2,p3, flatness=0.5, min_len=5.0):
 def parse_svg(path):
     tree = ET.parse(path)
     root = tree.getroot()
+    
+    def get_element_label(elem):
+        # Prefer inkscape:label (namespace-aware) when present and non-empty,
+        # otherwise fall back to id or name.
+        lbl = elem.get('{http://www.inkscape.org/namespaces/inkscape}label')
+        if lbl and lbl.strip():
+            return lbl
+        lbl = elem.get('inkscape:label')
+        if lbl and lbl.strip():
+            return lbl
+        idv = elem.get('id')
+        if idv and idv.strip():
+            return idv
+        nm = elem.get('name')
+        if nm and nm.strip():
+            return nm
+        return None
     # Only rely on explicit SVG curve segments; do not consult external SM2D files
     sm2d_set = set()
     ns = {'svg': 'http://www.w3.org/2000/svg'}
     pieces = []
-    # determine units: if width contains mm and viewBox present, compute mm per viewBox unit
+    # determine units: parse width (supports mm, cm, in, px, pt, pc)
     width_attr = root.get('width', '')
     viewbox = root.get('viewBox') or root.get('viewbox')
     mm_per_unit = None
-    if width_attr and width_attr.endswith('mm') and viewbox:
-        try:
-            width_mm = float(width_attr[:-2])
-            vb = [float(x) for x in viewbox.replace(',', ' ').split()]
-            if len(vb) == 4:
-                vb_w = vb[2]
-                if vb_w != 0:
-                    mm_per_unit = width_mm / vb_w
-        except Exception:
-            mm_per_unit = None
+    if width_attr:
+        m = re.match(r"^\s*([+-]?[0-9]*\.?[0-9]+)\s*([a-zA-Z%]*)\s*$", width_attr)
+        if m:
+            val = float(m.group(1))
+            unit = (m.group(2) or 'px').lower()
+            # mm per single unit of unit type
+            if unit == 'mm':
+                unit_mm = 1.0
+            elif unit == 'cm':
+                unit_mm = 10.0
+            elif unit == 'in':
+                unit_mm = 25.4
+            elif unit == 'pt':
+                unit_mm = 25.4 / 72.0
+            elif unit == 'pc':
+                unit_mm = 25.4 / 6.0
+            elif unit == 'px':
+                unit_mm = 25.4 / 96.0
+            else:
+                unit_mm = None
+            if unit_mm is not None:
+                width_mm = val * unit_mm
+                if viewbox:
+                    try:
+                        vb = [float(x) for x in viewbox.replace(',', ' ').split()]
+                        if len(vb) == 4 and vb[2] != 0:
+                            mm_per_unit = width_mm / vb[2]
+                    except Exception:
+                        mm_per_unit = None
+                else:
+                    # no viewBox: assume one user unit equals the metric unit (e.g. 1 unit == 1px/cm)
+                    mm_per_unit = unit_mm
     if mm_per_unit is None:
-        # fallback: assume units are mm already
+        # last-resort fallback: treat units as mm
         mm_per_unit = 1.0
     # find groups with id or <piece> equivalents
     for g in root.findall('.//{http://www.w3.org/2000/svg}g'):
-        gid = g.get('id') or g.get('inkscape:label') or g.get('name')
+        gid = get_element_label(g)
         paths = []
         for p in g.findall('{http://www.w3.org/2000/svg}path'):
             d = p.get('d') or ''
@@ -157,9 +226,9 @@ def parse_svg(path):
             ys = [p[1] for path in paths for p in path['points']]
             bbox = (min(xs), min(ys), max(xs), max(ys)) if xs and ys else (0,0,0,0)
             pieces.append({'name': gid, 'paths': paths, 'bbox_mm': bbox})
-    # fallback: parse top-level paths
+    # fallback: if no groups found, treat each top-level <path> as a separate piece
     if not pieces:
-        paths = []
+        i = 0
         for p in root.findall('.//{http://www.w3.org/2000/svg}path'):
             d = p.get('d') or ''
             if not d.strip():
@@ -192,10 +261,18 @@ def parse_svg(path):
                         points.append(pt)
                 else:
                     raw_segs.append(('UNK', s))
-            paths.append({'points': points, 'is_curve': is_curve, 'segs': raw_segs})
-        if paths:
-            xs = [p[0] for path in paths for p in path['points']]
-            ys = [p[1] for path in paths for p in path['points']]
+
+            if not points:
+                continue
+
+            # compute bbox for this single path
+            xs = [pt[0] for pt in points]
+            ys = [pt[1] for pt in points]
             bbox = (min(xs), min(ys), max(xs), max(ys)) if xs and ys else (0,0,0,0)
-            pieces.append({'name': 'layer0', 'paths': paths, 'bbox_mm': bbox})
+
+            # extract a meaningful name: prefer inkscape:label (ns-aware), then id/name, else generated
+            name = get_element_label(p) or f'piece_{i}'
+
+            pieces.append({'name': name, 'paths': [{'points': points, 'is_curve': is_curve, 'segs': raw_segs}], 'bbox_mm': bbox})
+            i += 1
     return pieces
